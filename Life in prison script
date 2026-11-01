@@ -1,0 +1,441 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+
+-- // Resolvers
+local function resolveCriminalBase()
+    local spawns = workspace:FindFirstChild("Spawns")
+    if not spawns then return nil end
+    local criminalSpawns = spawns:FindFirstChild("CriminalSpawns")
+    if not criminalSpawns then return nil end
+    local spawnLocation = criminalSpawns:FindFirstChild("SpawnLocation")
+    if not spawnLocation then return nil end
+    if spawnLocation:IsA("BasePart") then return spawnLocation.CFrame * CFrame.new(0, 5, 0) end
+    for _, v in ipairs(spawnLocation:GetDescendants()) do
+        if v:IsA("BasePart") then return v.CFrame * CFrame.new(0, 5, 0) end
+    end
+    return nil
+end
+
+local function resolveGuardsBase()
+    local spawns = workspace:FindFirstChild("Spawns")
+    if not spawns then return nil end
+    local policeSpawns = spawns:FindFirstChild("PoliceSpawns")
+    if not policeSpawns then return nil end
+    local target = policeSpawns:GetChildren()[7]
+    if not target then return nil end
+    if target:IsA("BasePart") then return target.CFrame * CFrame.new(0, 5, 0) end
+    for _, v in ipairs(target:GetDescendants()) do
+        if v:IsA("BasePart") then return v.CFrame * CFrame.new(0, 5, 0) end
+    end
+    return nil
+end
+
+local function teleport(resolver)
+    local char = player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local cf = resolver()
+    if not cf then return end
+    root.CFrame = cf
+end
+
+-- // Godmode
+local godmodeActive = false
+local healthConn = nil
+local loopThread = nil
+
+local function stopGodmode(godBtn, statusLbl)
+    godmodeActive = false
+    if healthConn then healthConn:Disconnect() healthConn = nil end
+    if loopThread then task.cancel(loopThread) loopThread = nil end
+    godBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 0)
+    godBtn.Text = "Godmode"
+    if statusLbl then statusLbl.Text = "" end
+end
+
+local function attachGodmode(godBtn, statusLbl)
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return end
+    local savedCFrame = root.CFrame
+    loopThread = task.spawn(function()
+        while godmodeActive do
+            local c = player.Character
+            if c then
+                local r = c:FindFirstChild("HumanoidRootPart")
+                local h = c:FindFirstChildOfClass("Humanoid")
+                if r and h and h.Health > 0 then savedCFrame = r.CFrame end
+            end
+            task.wait(0.05)
+        end
+    end)
+    healthConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
+        if hum.Health <= 0 and godmodeActive then
+            statusLbl.Text = "💀 died — respawning..."
+            local deathCFrame = savedCFrame
+            local newChar = player.CharacterAdded:Wait()
+            task.wait(0.3)
+            local newRoot = newChar:WaitForChild("HumanoidRootPart", 5)
+            if newRoot then
+                newRoot.CFrame = deathCFrame
+                statusLbl.Text = "✓ snapped back"
+            end
+            if godmodeActive then
+                if healthConn then healthConn:Disconnect() end
+                if loopThread then task.cancel(loopThread) end
+                attachGodmode(godBtn, statusLbl)
+            end
+        end
+    end)
+end
+
+-- // Spectate
+local spectateActive = false
+local spectateConn = nil
+local selectedPlayer = nil
+local selectedBtn = nil
+
+local function stopSpectate(specBtn, specStatus)
+    spectateActive = false
+    if spectateConn then spectateConn:Disconnect() spectateConn = nil end
+    camera.CameraType = Enum.CameraType.Custom
+    local selfChar = player.Character
+    camera.CameraSubject = selfChar and selfChar:FindFirstChildOfClass("Humanoid") or nil
+    specBtn.Text = "Spectate Player"
+    specBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 120)
+    if specStatus then specStatus.Text = "" end
+end
+
+local function startSpectate(target, specBtn, specStatus)
+    if not target then
+        if specStatus then specStatus.Text = "⚠ pick a player first" end
+        return
+    end
+    local targetChar = target.Character
+    if not targetChar then
+        if specStatus then specStatus.Text = "⚠ player has no character" end
+        return
+    end
+    local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+    if not targetHum then
+        if specStatus then specStatus.Text = "⚠ target not loaded" end
+        return
+    end
+    spectateActive = true
+    specBtn.Text = "Stop Spectate"
+    specBtn.BackgroundColor3 = Color3.fromRGB(220, 38, 38)
+    if specStatus then specStatus.Text = "👁 spectating " .. target.Name end
+    camera.CameraType = Enum.CameraType.Custom
+    camera.CameraSubject = targetHum
+    spectateConn = target.CharacterAdded:Connect(function(newChar)
+        task.wait(0.3)
+        local newHum = newChar:WaitForChild("Humanoid", 5)
+        if newHum and spectateActive then
+            camera.CameraSubject = newHum
+        end
+    end)
+end
+
+-- // Goto Player
+local function gotoPlayer(target, statusLbl)
+    if not target then
+        if statusLbl then statusLbl.Text = "⚠ pick a player first" end
+        return
+    end
+    local targetChar = target.Character
+    if not targetChar then
+        if statusLbl then statusLbl.Text = "⚠ player has no character" end
+        return
+    end
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then
+        if statusLbl then statusLbl.Text = "⚠ cant find player" end
+        return
+    end
+    local myChar = player.Character
+    if not myChar then
+        if statusLbl then statusLbl.Text = "⚠ no character" end
+        return
+    end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then
+        if statusLbl then statusLbl.Text = "⚠ no root" end
+        return
+    end
+    -- teleport slightly beside the target so we dont clip into them
+    myRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
+    if statusLbl then
+        statusLbl.Text = "✓ went to " .. target.Name
+        task.delay(3, function()
+            if statusLbl and statusLbl.Parent then statusLbl.Text = "" end
+        end)
+    end
+end
+
+-- // GUI
+local sg = Instance.new("ScreenGui")
+sg.Name = "AxiomGUI"
+sg.ResetOnSpawn = false
+sg.Parent = playerGui
+
+-- main frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 210, 0, 285)
+frame.Position = UDim2.new(0.5, -105, 0.04, 0)
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = sg
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+-- title
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, 0, 0, 30)
+titleLbl.Position = UDim2.new(0, 0, 0, 0)
+titleLbl.BackgroundColor3 = Color3.fromRGB(30, 20, 60)
+titleLbl.BorderSizePixel = 0
+titleLbl.Text = "AXIOM"
+titleLbl.TextColor3 = Color3.fromRGB(200, 180, 255)
+titleLbl.TextSize = 13
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.Parent = frame
+Instance.new("UICorner", titleLbl).CornerRadius = UDim.new(0, 8)
+
+-- X
+local xBtn = Instance.new("TextButton")
+xBtn.Size = UDim2.new(0, 22, 0, 22)
+xBtn.Position = UDim2.new(1, -26, 0, 4)
+xBtn.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+xBtn.BorderSizePixel = 0
+xBtn.Text = "✕"
+xBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+xBtn.TextSize = 11
+xBtn.Font = Enum.Font.GothamBold
+xBtn.Parent = frame
+Instance.new("UICorner", xBtn).CornerRadius = UDim.new(0, 4)
+xBtn.MouseButton1Click:Connect(function()
+    godmodeActive = false
+    spectateActive = false
+    if healthConn then healthConn:Disconnect() end
+    if loopThread then task.cancel(loopThread) end
+    if spectateConn then spectateConn:Disconnect() end
+    camera.CameraType = Enum.CameraType.Custom
+    camera.CameraSubject = player.Character and player.Character:FindFirstChildOfClass("Humanoid") or nil
+    sg:Destroy()
+end)
+
+-- criminal base
+local crimBtn = Instance.new("TextButton")
+crimBtn.Size = UDim2.new(1, -20, 0, 32)
+crimBtn.Position = UDim2.new(0, 10, 0, 36)
+crimBtn.BackgroundColor3 = Color3.fromRGB(185, 28, 28)
+crimBtn.BorderSizePixel = 0
+crimBtn.Text = "Criminal Base"
+crimBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+crimBtn.TextSize = 13
+crimBtn.Font = Enum.Font.GothamBold
+crimBtn.Parent = frame
+Instance.new("UICorner", crimBtn).CornerRadius = UDim.new(0, 6)
+crimBtn.MouseButton1Click:Connect(function() teleport(resolveCriminalBase) end)
+
+-- guards base
+local guardBtn = Instance.new("TextButton")
+guardBtn.Size = UDim2.new(1, -20, 0, 32)
+guardBtn.Position = UDim2.new(0, 10, 0, 74)
+guardBtn.BackgroundColor3 = Color3.fromRGB(29, 78, 216)
+guardBtn.BorderSizePixel = 0
+guardBtn.Text = "Guards Base"
+guardBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+guardBtn.TextSize = 13
+guardBtn.Font = Enum.Font.GothamBold
+guardBtn.Parent = frame
+Instance.new("UICorner", guardBtn).CornerRadius = UDim.new(0, 6)
+guardBtn.MouseButton1Click:Connect(function() teleport(resolveGuardsBase) end)
+
+-- godmode
+local godBtn = Instance.new("TextButton")
+godBtn.Size = UDim2.new(1, -20, 0, 32)
+godBtn.Position = UDim2.new(0, 10, 0, 112)
+godBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 0)
+godBtn.BorderSizePixel = 0
+godBtn.Text = "Godmode"
+godBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+godBtn.TextSize = 13
+godBtn.Font = Enum.Font.GothamBold
+godBtn.Parent = frame
+Instance.new("UICorner", godBtn).CornerRadius = UDim.new(0, 6)
+
+local godStatus = Instance.new("TextLabel")
+godStatus.Size = UDim2.new(1, -20, 0, 12)
+godStatus.Position = UDim2.new(0, 10, 0, 148)
+godStatus.BackgroundTransparency = 1
+godStatus.Text = ""
+godStatus.TextColor3 = Color3.fromRGB(250, 204, 21)
+godStatus.TextSize = 10
+godStatus.Font = Enum.Font.Gotham
+godStatus.TextXAlignment = Enum.TextXAlignment.Left
+godStatus.Parent = frame
+
+godBtn.MouseButton1Click:Connect(function()
+    if godmodeActive then
+        stopGodmode(godBtn, godStatus)
+    else
+        godmodeActive = true
+        godBtn.BackgroundColor3 = Color3.fromRGB(202, 138, 4)
+        godBtn.Text = "Godmode [ON]"
+        godStatus.Text = "watching health..."
+        attachGodmode(godBtn, godStatus)
+    end
+end)
+
+-- spectate
+local specBtn = Instance.new("TextButton")
+specBtn.Size = UDim2.new(1, -20, 0, 32)
+specBtn.Position = UDim2.new(0, 10, 0, 163)
+specBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 120)
+specBtn.BorderSizePixel = 0
+specBtn.Text = "Spectate Player"
+specBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+specBtn.TextSize = 13
+specBtn.Font = Enum.Font.GothamBold
+specBtn.Parent = frame
+Instance.new("UICorner", specBtn).CornerRadius = UDim.new(0, 6)
+
+-- goto player
+local gotoBtn = Instance.new("TextButton")
+gotoBtn.Size = UDim2.new(1, -20, 0, 32)
+gotoBtn.Position = UDim2.new(0, 10, 0, 201)
+gotoBtn.BackgroundColor3 = Color3.fromRGB(20, 110, 80)
+gotoBtn.BorderSizePixel = 0
+gotoBtn.Text = "Goto Player"
+gotoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+gotoBtn.TextSize = 13
+gotoBtn.Font = Enum.Font.GothamBold
+gotoBtn.Parent = frame
+Instance.new("UICorner", gotoBtn).CornerRadius = UDim.new(0, 6)
+
+-- shared status for spectate + goto
+local specStatus = Instance.new("TextLabel")
+specStatus.Size = UDim2.new(1, -20, 0, 12)
+specStatus.Position = UDim2.new(0, 10, 0, 238)
+specStatus.BackgroundTransparency = 1
+specStatus.Text = ""
+specStatus.TextColor3 = Color3.fromRGB(147, 197, 253)
+specStatus.TextSize = 10
+specStatus.Font = Enum.Font.Gotham
+specStatus.TextXAlignment = Enum.TextXAlignment.Left
+specStatus.Parent = frame
+
+specBtn.MouseButton1Click:Connect(function()
+    if spectateActive then
+        stopSpectate(specBtn, specStatus)
+    else
+        startSpectate(selectedPlayer, specBtn, specStatus)
+    end
+end)
+
+gotoBtn.MouseButton1Click:Connect(function()
+    gotoPlayer(selectedPlayer, specStatus)
+end)
+
+-- // Player list panel — attached to frame so drags with it
+local listPanel = Instance.new("Frame")
+listPanel.Size = UDim2.new(0, 155, 0, 285)
+listPanel.Position = UDim2.new(0, 220, 0, 0)
+listPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+listPanel.BorderSizePixel = 0
+listPanel.Parent = frame
+Instance.new("UICorner", listPanel).CornerRadius = UDim.new(0, 8)
+
+local listTitle = Instance.new("TextLabel")
+listTitle.Size = UDim2.new(1, 0, 0, 30)
+listTitle.Position = UDim2.new(0, 0, 0, 0)
+listTitle.BackgroundColor3 = Color3.fromRGB(30, 20, 60)
+listTitle.BorderSizePixel = 0
+listTitle.Text = "Players"
+listTitle.TextColor3 = Color3.fromRGB(200, 180, 255)
+listTitle.TextSize = 12
+listTitle.Font = Enum.Font.GothamBold
+listTitle.Parent = listPanel
+Instance.new("UICorner", listTitle).CornerRadius = UDim.new(0, 8)
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -10, 1, -38)
+scroll.Position = UDim2.new(0, 5, 0, 34)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 3
+scroll.ScrollBarImageColor3 = Color3.fromRGB(139, 92, 246)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = listPanel
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.Name
+listLayout.Padding = UDim.new(0, 4)
+listLayout.Parent = scroll
+
+local listPad = Instance.new("UIPadding")
+listPad.PaddingTop = UDim.new(0, 2)
+listPad.Parent = scroll
+
+-- // Player buttons
+local function makePlayerBtn(p)
+    if p == player then return end
+    local pb = Instance.new("TextButton")
+    pb.Size = UDim2.new(1, -6, 0, 30)
+    pb.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    pb.BorderSizePixel = 0
+    pb.Text = p.Name
+    pb.TextColor3 = Color3.fromRGB(210, 210, 255)
+    pb.TextSize = 11
+    pb.Font = Enum.Font.GothamBold
+    pb.Name = p.Name
+    pb.Parent = scroll
+    Instance.new("UICorner", pb).CornerRadius = UDim.new(0, 6)
+
+    pb.MouseButton1Click:Connect(function()
+        if selectedBtn then
+            selectedBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+            selectedBtn.TextColor3 = Color3.fromRGB(210, 210, 255)
+        end
+        selectedPlayer = p
+        selectedBtn = pb
+        pb.BackgroundColor3 = Color3.fromRGB(99, 60, 255)
+        pb.TextColor3 = Color3.fromRGB(255, 255, 255)
+        specStatus.Text = p.Name .. " selected"
+    end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    makePlayerBtn(p)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    makePlayerBtn(p)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    local btn = scroll:FindFirstChild(p.Name)
+    if btn then btn:Destroy() end
+    if selectedPlayer == p then
+        selectedPlayer = nil
+        selectedBtn = nil
+        specStatus.Text = "player left"
+        if spectateActive then stopSpectate(specBtn, specStatus) end
+    end
+end)
+
+player.CharacterAdded:Connect(function()
+    if godmodeActive then
+        task.wait(0.3)
+        attachGodmode(godBtn, godStatus)
+    end
+end)
